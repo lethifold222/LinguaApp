@@ -447,8 +447,12 @@ const App: React.FC = () => {
         })()}
         {sect === 'REVIEW' && (() => {
           const currentProgress = user.mode === UserMode.KID ? user.progress?.kid : user.progress?.adult;
-          const seenIds = currentProgress?.seenWordIds || [];
-          return <WordCarousel words={words.filter(w => seenIds.includes(w.id)).slice(0, 15)} user={user} lang={lang} onFinish={() => setSect('DASHBOARD')} onBack={() => setSect('DASHBOARD')} />;
+          const learnedIds = currentProgress?.learnedWordIds || [];
+          // Берём только выученные слова текущего режима и перемешиваем их
+          const reviewWords = words
+            .filter(w => learnedIds.includes(w.id))
+            .sort(() => 0.5 - Math.random());
+          return <WordCarousel words={reviewWords} user={user} lang={lang} onFinish={() => setSect('DASHBOARD')} onBack={() => setSect('DASHBOARD')} />;
         })()}
         {sect === 'TEST' && (() => {
           const currentProgress = user.mode === UserMode.KID ? user.progress?.kid : user.progress?.adult;
