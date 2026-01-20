@@ -5,6 +5,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  onAuthStateChanged,
 } from 'firebase/auth';
 import {
   doc,
@@ -79,7 +80,15 @@ export const authService = {
       const uid = cred.user.uid;
 
       const userDoc: User = buildDefaultUser(username);
-      await setDoc(doc(db, 'users', uid), userDoc);
+      
+      // Пытаемся создать документ в Firestore, но не критично если не получится
+      try {
+        await setDoc(doc(db, 'users', uid), userDoc);
+      } catch (firestoreError: any) {
+        // Если Firestore недоступен, но Auth успешен - всё равно считаем регистрацию успешной
+        // Документ создастся позже при первом входе
+        console.error('Firestore error during registration (non-critical):', firestoreError);
+      }
 
       return { success: true };
     } catch (e: any) {
@@ -111,6 +120,10 @@ export const authService = {
         snap = await getDoc(ref);
       } catch (fetchError: any) {
         console.error('Error fetching document:', fetchError);
+        const code = fetchError?.code;
+        if (code === 'unavailable' || code === 'failed-precondition') {
+          return { user: null, error: 'Database unavailable. Please check your internet connection and try again.' };
+        }
         throw fetchError;
       }
 
@@ -218,5 +231,68 @@ export const authService = {
     } catch (e) {
       console.error('Update level error:', e);
     }
+  },
+
+  // Получить текущего пользователя из сохранённой сессии
+  getCurrentUser: async (): Promise<User | null> => {
+    try {
+      const current = auth.currentUser;
+      if (!current) return null;
+
+      const ref = doc(db, 'users', current.uid);
+      const snap = await getDoc(ref);
+
+      if (!snap.exists()) {
+        // Если пользователь есть в Auth, но нет документа - создаём
+        const userDoc = buildDefaultUser(current.email?.split('@')[0] || 'user');
+        try {
+          await setDoc(ref, userDoc);
+          return userDoc;
+        } catch (createError: any) {
+          console.error('Error creating user document:', createError);
+          return userDoc;
+        }
+      }
+
+      const data = snap.data() as any;
+      const migratedProgress = migrateProgress(data.progress);
+
+      const migratedUser: User = {
+        username: data.username || current.email?.split('@')[0] || 'user',
+        passwordHash: data.passwordHash || '',
+        mode: data.mode || UserMode.ADULT,
+        level: data.level || ProficiencyLevel.EASY,
+        progress: migratedProgress,
+      };
+
+      if (migratedProgress !== data.progress) {
+        await updateDoc(ref, { progress: migratedProgress });
+      }
+
+      if (!data.username || !data.mode || !data.level) {
+        await updateDoc(ref, {
+          username: migratedUser.username,
+          mode: migratedUser.mode,
+          level: migratedUser.level,
+        });
+      }
+
+      return migratedUser;
+    } catch (e: any) {
+      console.error('Get current user error:', e);
+      return null;
+    }
+  },
+
+  // Подписка на изменения состояния аутентификации
+  onAuthStateChanged: (callback: (user: User | null) => void) => {
+    return onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const user = await authService.getCurrentUser();
+        callback(user);
+      } else {
+        callback(null);
+      }
+    });
   },
 };

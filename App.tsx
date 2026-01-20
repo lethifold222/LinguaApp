@@ -223,9 +223,13 @@ const TestMode: React.FC<{ words: Word[]; user: User; lang: Language; onFinish: 
   const [idx, setIdx] = useState(0);
   const [result, setResult] = useState<boolean | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [correctAnswers, setCorrectAnswers] = useState(0);
+  const [testFinished, setTestFinished] = useState(false);
   const t = UI_STRINGS[lang];
   const word = words[idx];
   const [opts, setOpts] = useState<string[]>([]);
+  const showImages = user.mode === UserMode.KID; // Показывать картинки только в детском режиме
+  
   useEffect(() => {
     if (!word) return;
     const correct = lang === Language.RUSSIAN ? word.russian : lang === Language.ARMENIAN ? word.armenian : word.english;
@@ -235,30 +239,67 @@ const TestMode: React.FC<{ words: Word[]; user: User; lang: Language; onFinish: 
     setResult(null);
     setSelected(null);
   }, [word, lang, words]);
+  
   const handleSelect = (opt: string) => {
     if (result !== null) return;
     const correct = lang === Language.RUSSIAN ? word.russian : lang === Language.ARMENIAN ? word.armenian : word.english;
     setSelected(opt);
-    setResult(opt === correct);
-    setTimeout(() => { if (idx < words.length - 1) setIdx(prev => prev + 1); else onFinish(); }, 1200);
+    const isCorrect = opt === correct;
+    setResult(isCorrect);
+    if (isCorrect) {
+      setCorrectAnswers(prev => prev + 1);
+    }
+    setTimeout(() => { 
+      if (idx < words.length - 1) {
+        setIdx(prev => prev + 1);
+      } else {
+        setTestFinished(true);
+      }
+    }, 1200);
   };
+
+  // Экран результатов
+  if (testFinished) {
+    const score = correctAnswers;
+    const total = words.length;
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[80vh] p-4">
+        <div className="w-full max-w-sm animate-fadeIn text-center">
+          <div className="bg-white p-8 rounded-[2rem] shadow-lg border border-slate-100">
+            <div className="text-6xl mb-6">{score === total ? '🎉' : score >= total * 0.7 ? '✨' : '📚'}</div>
+            <h2 className="text-3xl font-black text-slate-900 mb-4">{t.testComplete}</h2>
+            <p className="text-5xl font-black text-indigo-600 mb-2">{score} / {total}</p>
+            <p className="text-slate-400 font-bold text-sm mb-8">{t.testScore.replace('{score}', score.toString()).replace('{total}', total.toString())}</p>
+            <button onClick={onFinish} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black text-xl shadow-lg hover:bg-indigo-700 transition-all active:scale-95">
+              {t.back}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!word) return <div className="p-20 text-center font-black">{t.emptyDictionary}</div>;
   const correctVal = lang === Language.RUSSIAN ? word.russian : lang === Language.ARMENIAN ? word.armenian : word.english;
   const imageUrl = getWordImage(word, user.mode === UserMode.KID);
+  
   return (
     <div className="flex flex-col items-center p-4">
-      <div className="w-full max-w-sm flex items-center mb-6">
+      <div className="w-full max-w-sm flex items-center justify-between mb-6">
         <button onClick={onBack} className="bg-white w-10 h-10 flex items-center justify-center rounded-xl shadow-sm border border-slate-100 text-indigo-600 hover:bg-indigo-50 transition-all">← {t.back}</button>
+        <p className="text-slate-400 font-bold text-xs">{idx + 1} / {words.length}</p>
       </div>
       <div className="w-full max-w-sm animate-fadeIn text-center">
         <div className="bg-white p-8 rounded-[2rem] shadow-lg border border-slate-100 mb-8 inline-block w-full">
-          <div className="mb-4 p-4 rounded-3xl flex items-center justify-center min-h-[180px] bg-slate-50 overflow-hidden">
-            <img
-              src={imageUrl}
-              className="h-40 w-40 object-contain rounded-2xl drop-shadow-md"
-              alt={word.english}
-            />
-          </div>
+          {showImages && (
+            <div className="mb-4 p-4 rounded-3xl flex items-center justify-center min-h-[180px] bg-slate-50 overflow-hidden">
+              <img
+                src={imageUrl}
+                className="h-40 w-40 object-contain rounded-2xl drop-shadow-md"
+                alt={word.english}
+              />
+            </div>
+          )}
           <h2 className="text-5xl font-black text-slate-900">{word.english}</h2>
           {user.mode !== UserMode.KID && word.transcription && (
             <p className="text-indigo-400 font-bold mt-2 italic">{word.transcription}</p>
@@ -312,12 +353,26 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [dictionaryTab, setDictionaryTab] = useState<'MY' | 'ALL'>('MY');
+  const [isLoading, setIsLoading] = useState(true);
 
   const onAuth = useCallback((u: User) => { 
     setUser(u); 
     setSect('DASHBOARD');
   }, []);
   const onLogout = useCallback(() => { setUser(null); setShowSettings(false); authService.logout(); }, []);
+
+  // Автоматический вход при загрузке приложения (проверка сохранённой сессии)
+  useEffect(() => {
+    const unsubscribe = authService.onAuthStateChanged((user) => {
+      if (user) {
+        setUser(user);
+        setSect('DASHBOARD');
+      }
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
   
   const toggleMode = useCallback(async () => {
     if (!user) return;
@@ -389,6 +444,18 @@ const App: React.FC = () => {
     );
   }, [user?.progress?.kid, user?.progress?.adult, searchQuery, dictionaryTab]);
 
+  // Показываем загрузку пока проверяем сохранённую сессию
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-indigo-600 flex items-center justify-center">
+        <div className="text-white text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-white/20 rounded-2xl shadow-lg mb-4 text-white text-3xl font-black animate-pulse">L</div>
+          <p className="text-lg font-bold">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) return <AuthScreen onAuth={onAuth} />;
   const t = UI_STRINGS[lang];
 
@@ -405,6 +472,7 @@ const App: React.FC = () => {
               <button key={l} onClick={() => setLang(l)} className={`w-8 h-8 rounded-md text-[10px] font-black transition-all ${lang === l ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400'}`}>{l}</button>
             ))}
           </div>
+          <button onClick={onLogout} className="text-red-500 font-bold px-3 py-1.5 hover:bg-red-50 rounded-xl transition-all text-xs">{t.logout}</button>
           <button onClick={() => setShowSettings(!showSettings)} className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg transition-all ${showSettings ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500'}`}>⚙️</button>
         </div>
       </header>
@@ -457,7 +525,9 @@ const App: React.FC = () => {
         {sect === 'TEST' && (() => {
           const currentProgress = user.mode === UserMode.KID ? user.progress?.kid : user.progress?.adult;
           const learnedIds = currentProgress?.learnedWordIds || [];
-          return <TestMode words={words.filter(w => learnedIds.includes(w.id)).sort(() => 0.5 - Math.random())} user={user} lang={lang} onFinish={() => setSect('DASHBOARD')} onBack={() => setSect('DASHBOARD')} />;
+          // Берем только 10 случайных слов из выученных
+          const testWords = words.filter(w => learnedIds.includes(w.id)).sort(() => 0.5 - Math.random()).slice(0, 10);
+          return <TestMode words={testWords} user={user} lang={lang} onFinish={() => setSect('DASHBOARD')} onBack={() => setSect('DASHBOARD')} />;
         })()}
         {sect === 'DICTIONARY' && (
           <div className="px-4 max-w-4xl mx-auto">
