@@ -228,23 +228,44 @@ const TestMode: React.FC<{ words: Word[]; user: User; lang: Language; onFinish: 
   const t = UI_STRINGS[lang];
   const word = words[idx];
   const [opts, setOpts] = useState<string[]>([]);
-  const showImages = user.mode === UserMode.KID; // Показывать картинки только в детском режиме
+  const [imageOptions, setImageOptions] = useState<Word[]>([]);
+  const isKidMode = user.mode === UserMode.KID;
   
   useEffect(() => {
     if (!word) return;
-    const correct = lang === Language.RUSSIAN ? word.russian : lang === Language.ARMENIAN ? word.armenian : word.english;
-    const dists = words.filter(w => w.id !== word.id).sort(() => 0.5 - Math.random()).slice(0, 3).map(w => lang === Language.RUSSIAN ? w.russian : lang === Language.ARMENIAN ? w.armenian : w.english);
-    while (dists.length < 3) dists.push("???");
-    setOpts([correct, ...dists].sort(() => 0.5 - Math.random()));
+    
+    if (isKidMode) {
+      // Для детского режима: 4 картинки (1 правильная + 3 случайные из детского словаря)
+      const allKidWords = KID_WORDS_DATA;
+      const distWords = allKidWords.filter(w => w.id !== word.id).sort(() => 0.5 - Math.random()).slice(0, 3);
+      const imageOpts = [word, ...distWords].sort(() => 0.5 - Math.random());
+      setImageOptions(imageOpts);
+    } else {
+      // Для взрослого режима: 4 текстовых варианта
+      const correct = lang === Language.RUSSIAN ? word.russian : lang === Language.ARMENIAN ? word.armenian : word.english;
+      const dists = words.filter(w => w.id !== word.id).sort(() => 0.5 - Math.random()).slice(0, 3).map(w => lang === Language.RUSSIAN ? w.russian : lang === Language.ARMENIAN ? w.armenian : w.english);
+      while (dists.length < 3) dists.push("???");
+      setOpts([correct, ...dists].sort(() => 0.5 - Math.random()));
+    }
+    
     setResult(null);
     setSelected(null);
-  }, [word, lang, words]);
+  }, [word, lang, words, isKidMode]);
   
   const handleSelect = (opt: string) => {
     if (result !== null) return;
-    const correct = lang === Language.RUSSIAN ? word.russian : lang === Language.ARMENIAN ? word.armenian : word.english;
+    
+    let isCorrect = false;
+    if (isKidMode) {
+      // Для детского режима: проверяем по ID слова
+      isCorrect = opt === word.id;
+    } else {
+      // Для взрослого режима: проверяем по тексту
+      const correct = lang === Language.RUSSIAN ? word.russian : lang === Language.ARMENIAN ? word.armenian : word.english;
+      isCorrect = opt === correct;
+    }
+    
     setSelected(opt);
-    const isCorrect = opt === correct;
     setResult(isCorrect);
     if (isCorrect) {
       setCorrectAnswers(prev => prev + 1);
@@ -256,6 +277,10 @@ const TestMode: React.FC<{ words: Word[]; user: User; lang: Language; onFinish: 
         setTestFinished(true);
       }
     }, 1200);
+  };
+  
+  const handleImageSelect = (wordId: string) => {
+    handleSelect(wordId);
   };
 
   // Экран результатов
@@ -281,8 +306,72 @@ const TestMode: React.FC<{ words: Word[]; user: User; lang: Language; onFinish: 
 
   if (!word) return <div className="p-20 text-center font-black">{t.emptyDictionary}</div>;
   const correctVal = lang === Language.RUSSIAN ? word.russian : lang === Language.ARMENIAN ? word.armenian : word.english;
-  const imageUrl = getWordImage(word, user.mode === UserMode.KID);
   
+  // Детский режим: выбор картинки
+  if (isKidMode) {
+    return (
+      <div className="flex flex-col items-center p-4 min-h-[80vh]">
+        <div className="w-full max-w-sm flex items-center justify-between mb-6">
+          <button onClick={onBack} className="bg-white w-10 h-10 flex items-center justify-center rounded-xl shadow-sm border border-slate-100 text-indigo-600 hover:bg-indigo-50 transition-all">← {t.back}</button>
+          <p className="text-slate-400 font-bold text-xs">{idx + 1} / {words.length}</p>
+        </div>
+        <div className="w-full max-w-sm animate-fadeIn text-center">
+          <div className="bg-white p-8 rounded-[2rem] shadow-lg border border-slate-100 mb-8">
+            <h2 className="text-6xl font-black text-slate-900 mb-4">{word.english}</h2>
+            <button 
+              onClick={() => speechService.speak(word.english)} 
+              className="mb-6 w-16 h-16 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 shadow-lg flex items-center justify-center text-2xl mx-auto active:scale-90 transition-all"
+            >
+              🔊
+            </button>
+            <p className="text-slate-400 font-bold text-sm uppercase tracking-widest mb-6">{t.test}</p>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            {imageOptions.map((optWord) => {
+              const optImageUrl = getWordImage(optWord, true);
+              const isSelected = selected === optWord.id;
+              const isCorrect = optWord.id === word.id;
+              const showResult = result !== null;
+              
+              let buttonClass = 'bg-white border-2 border-slate-100 hover:border-indigo-400 hover:scale-105';
+              if (showResult) {
+                if (isCorrect) {
+                  buttonClass = 'bg-emerald-500 border-emerald-500 scale-105';
+                } else if (isSelected && !isCorrect) {
+                  buttonClass = 'bg-red-500 border-red-500';
+                } else {
+                  buttonClass = 'opacity-30 grayscale';
+                }
+              }
+              
+              return (
+                <button
+                  key={optWord.id}
+                  onClick={() => handleImageSelect(optWord.id)}
+                  disabled={result !== null}
+                  className={`p-4 rounded-2xl transition-all shadow-sm ${buttonClass}`}
+                >
+                  <img
+                    src={optImageUrl}
+                    className="w-full h-32 object-contain rounded-xl"
+                    alt={optWord.english}
+                  />
+                </button>
+              );
+            })}
+          </div>
+          
+          <div className="h-12 flex items-center justify-center text-2xl font-black">
+            {result === true && <p className="text-emerald-500">✨ {t.correct}</p>}
+            {result === false && <p className="text-red-500">❌ {t.wrong}</p>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Взрослый режим: выбор текста (без картинок)
   return (
     <div className="flex flex-col items-center p-4">
       <div className="w-full max-w-sm flex items-center justify-between mb-6">
@@ -291,17 +380,8 @@ const TestMode: React.FC<{ words: Word[]; user: User; lang: Language; onFinish: 
       </div>
       <div className="w-full max-w-sm animate-fadeIn text-center">
         <div className="bg-white p-8 rounded-[2rem] shadow-lg border border-slate-100 mb-8 inline-block w-full">
-          {showImages && (
-            <div className="mb-4 p-4 rounded-3xl flex items-center justify-center min-h-[180px] bg-slate-50 overflow-hidden">
-              <img
-                src={imageUrl}
-                className="h-40 w-40 object-contain rounded-2xl drop-shadow-md"
-                alt={word.english}
-              />
-            </div>
-          )}
           <h2 className="text-5xl font-black text-slate-900">{word.english}</h2>
-          {user.mode !== UserMode.KID && word.transcription && (
+          {word.transcription && (
             <p className="text-indigo-400 font-bold mt-2 italic">{word.transcription}</p>
           )}
           <p className="text-slate-400 font-bold mt-2 uppercase tracking-widest">{t.test}</p>
