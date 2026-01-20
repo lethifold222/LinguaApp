@@ -1,0 +1,7 @@
+{
+  "name": "Linguist Pro: EN-RU-AM",
+  "description": "A comprehensive English learning application supporting Russian and Armenian, featuring Kid and Adult modes, text-to-speech, and progress tracking.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
